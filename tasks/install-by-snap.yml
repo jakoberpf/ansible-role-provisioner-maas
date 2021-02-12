@@ -1,0 +1,46 @@
+---
+
+- name: Install MAAS with snap
+  become: yes
+  snap:
+    name: maas
+    channel: 2.9/stable
+  when: pkgm == "snap"
+
+- name: Initiate maas controller with command
+  shell: sudo maas init region+rack 
+                        --maas-url http://{{ hostvars[inventory_hostname]['ansible_' + maas_interface].ipv4.address }}:5240/MAAS
+                        --database-uri "postgres://maas:{{ postgresql_maas_password }}@{{ postgres_ip }}:{{ postgres_port }}/maas"
+                        --enable-debug
+  when: inventory_hostname == leader_hostname
+
+- name: Confirm the initialisation of the primary node
+  pause:
+    prompt: "Are you sure that the primary MAAS node successfully initialized (You can check by browsing to http://{{ hostvars[inventory_hostname]['ansible_' + maas_interface].ipv4.address }}:5240/MAAS)? (yes/no)"
+  register: confirm_primary_init
+
+- name: Create MAAS admin user
+  become: yes
+  shell: maas createadmin --username admin
+                          --password {{ maas_admin_password }}
+                          --email admin@apefactory.com
+                          --ssh-import gh:jakoberpf
+  when: inventory_hostname == leader_hostname and confirm_primary_init.user_input | bool
+
+- name: Enter the MAAS secret to add additional controller nodes
+  pause:
+    prompt: "Please enter the MAAS secret (You can find it under the controller tab of the MAAS dashboard)"
+  register: confirm_maas_secret
+
+# https://maas.io/docs/snap/2.9/ui/high-availability#heading--region-controller-ha
+- name: Initiate maas controller with command
+  shell: sudo maas init region+rack 
+                        --maas-url http://{{ hostvars[inventory_hostname]['ansible_' + maas_interface].ipv4.address }}:5240/MAAS
+                        --database-uri "postgres://maas:{{ postgresql_maas_password }}@{{ postgres_ip }}:{{ postgres_port }}/maas"
+                        --enable-debug
+                        --secret {{ confirm_maas_secret.user_input }}
+  when: inventory_hostname != leader_hostname
+
+# https://maas.io/docs/snap/2.9/ui/hardening-your-maas-installation
+
+# https://discourse.maas.io/t/deploying-servers-with-full-disk-encryption-luks2/3286
