@@ -1,0 +1,83 @@
+---
+
+#######################################################################################################################################################
+### sudo PGPASSWORD=<password> -u postgres psql -h <ip> -p 15432 -d postgres -U postgres -c "CREATE USER maas WITH LOGIN PASSWORD '<password>'" ###
+#######################################################################################################################################################
+
+- name: Create MAAS postgres user
+  community.general.postgresql_user:
+    db: postgres
+    login_port: '{{ postgres_port }}'
+    login_host: '{{ postgres_ip }}'
+    login_user: postgres
+    login_password: '{{ postgresql_postgres_password }}'
+    name: '{{ postgres_maas_user }}'
+    password: '{{ postgresql_maas_password }}'
+    role_attr_flags: LOGIN,CREATEDB
+    state: present
+  when: inventory_hostname == leader_hostname
+  register: created_user
+
+# - name: Create MAAS postgres user
+#   become: yes
+#   shell: sudo PGPASSWORD={{ postgresql_postgres_password }} -u postgres psql -h {{ postgres_ip }} -p {{ postgres_port }} -d postgres -U postgres -c "CREATE USER {{ postgres_maas_user }} WITH LOGIN PASSWORD '{{ postgresql_maas_password }}'"
+#   register: created_user
+#   when: inventory_hostname == leader_hostname
+#   failed_when: 
+#     - "'already exists' not in created_user.stderr and 'CREATE ROLE' in created_user.stderr"
+#     - "'CREATE ROLE' not in created_user.stderr and 'already exists' in created_user.stderr"
+
+# - name: Output the registered results of create postgres user
+#   debug: var=created_user.stdout_lines
+#   when: inventory_hostname == leader_hostname
+
+############################################################################################################################################
+### sudo PGPASSWORD=<password> -u postgres psql -h 10.0.0.2 -p 15432 -d postgres -U postgres -c "CREATE DATABASE maasdb WITH OWNER maas" ###
+############################################################################################################################################
+
+- name: Create MAAS postgres database with maas owner
+  community.general.postgresql_db:
+    db: postgres
+    login_port: '{{ postgres_port }}'
+    login_host: '{{ postgres_ip }}'
+    login_user: postgres
+    login_password: '{{ postgresql_postgres_password }}'
+    name: maasdb
+    owner: maas
+  when: inventory_hostname == leader_hostname
+  register: created_db
+
+# - name: Create MAAS postgres database
+#   become: yes
+#   shell: sudo PGPASSWORD={{ postgresql_postgres_password }} -u postgres psql -h {{ postgres_ip }} -p {{ postgres_port }} -d postgres -U postgres -c "CREATE DATABASE {{ postgres_maas_name }} OWNER {{ postgres_maas_user }}"
+#   register: created_db
+#   when: inventory_hostname == leader_hostname
+#   failed_when: 
+#     - "'already exists' not in created_db.stderr and 'CREATE DATABASE' in created_db.stderr"
+#     - "'CREATE DATABASE' not in created_db.stderr and 'already exists' in created_db.stderr"
+
+# - name: Output the registered results of create postgres database
+#   debug: var=created_db.stdout_lines
+#   when: inventory_hostname == leader_hostname
+
+# /etc/postgresql/10/main/pg_hba.conf -> host    maas    maasdb    0/0     md5
+- name: Edit "pg_hba.conf" on leader node
+  become: true
+  lineinfile:
+        path: /data/patroni/pg_hba.conf
+        line:  host    maas    maasdb   0/0     md5
+        create: yes
+  when: inventory_hostname == leader_hostname  
+
+- name: Setup MAAS with apt
+  include_tasks: install-by-apt.yml
+  when: pkgm == "apt"
+
+- name: Setup MAAS with snap
+  include_tasks: install-by-snap.yml
+  when: pkgm == "snap"
+
+# sudo maas apikey --username admin
+
+# https://maas.io/docs/snap/2.9/ui/hardening-your-maas-installation
+# https://discourse.maas.io/t/deploying-servers-with-full-disk-encryption-luks2/3286
