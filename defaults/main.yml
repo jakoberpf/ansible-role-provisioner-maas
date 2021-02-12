@@ -1,0 +1,9 @@
+---
+# defaults file for maas
+
+maas_interface: eth0.10
+postgres_ip: 10.0.0.2
+postgres_port: 15432
+postgres_maas_name: maasdb
+postgres_maas_user: maas
+pkgm: apt
