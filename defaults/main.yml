@@ -1,9 +1,7 @@
 ---
-# defaults file for maas
-
-maas_interface: eth0.10
-postgres_ip: 10.0.0.2
-postgres_port: 15432
+# Defines the database name and user for the region controller database
 postgres_maas_name: maasdb
 postgres_maas_user: maas
+
+# Defines the package manager to use for installing maas ('apt' or 'snap')
 pkgm: apt
