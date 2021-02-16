@@ -6,16 +6,59 @@
     state: present
   when: pkgm == "apt"
 
+- name: Install MAAS 2.9 with apt
+  become: true
+  apt:
+    pkg: maas # includes maas-rack-controller and maas-region-controller
+  when: pkgm == "apt"
+  register: maas_installed
+
+- name: Wait for 10 seconds to give time to maas to fully initialize
+  wait_for:
+    timeout: 10
+  delegate_to: localhost
+
+- name: Stop maas-regiond service on all nodes
+  service:
+    name: maas-regiond
+    state: stopped
+
 #########################################################################
 ###     Initializing the MAAS leading region and rack controller.     ###
 #########################################################################
 
-- name: Create maas config directory at /etc/maas
+- name: Ensure stopped maas-regiond service on leader node
   become: true
-  file:
-    state: directory
-    path: /etc/maas
-  when: inventory_hostname == leader_hostname
+  service:
+    name: maas-regiond
+    state: stopped
+  when: inventory_hostname == maas_leader_hostname
+
+- name: Check that if maasdb dump exists
+  stat:
+    path: /tmp/maasdb.tar
+  register: maasdb_dump
+
+- name: Dump the existing local maasdb
+  become: true
+  become_user: postgres
+  community.general.postgresql_db:
+    name: maasdb
+    state: dump
+    target: /tmp/maasdb.tar
+  when: inventory_hostname == maas_leader_hostname and not maasdb_dump.stat.exists
+
+- name: Restore the to distributed maasdb
+  community.general.postgresql_db:
+    db: maasdb
+    login_port: '{{ postgres_port }}'
+    login_host: '{{ postgres_ip }}'
+    login_user: maas
+    login_password: '{{ postgresql_maas_password }}'
+    name: maasdb
+    state: restore
+    target: /tmp/maasdb.tar
+  when: inventory_hostname == maas_leader_hostname
 
 # sudo rm /etc/maas/regiond.conf
 - name: Delete maas region controller config at /etc/maas/regiond.conf
@@ -23,14 +66,15 @@
   file:
     state: touch
     path: /etc/maas/regiond.conf
-  when: inventory_hostname == leader_hostname
+  when: inventory_hostname == maas_leader_hostname
 
+# sudo touch /etc/maas/regiond.conf
 - name: Create maas region controller config at /etc/maas/regiond.conf
   become: true
   file:
     state: file
     path: /etc/maas/regiond.conf
-  when: inventory_hostname == leader_hostname
+  when: inventory_hostname == maas_leader_hostname
 
 # sudo nano /etc/maas/regiond.conf
 - name: Edit new maas region controller config at /etc/maas/regiond.conf
@@ -44,13 +88,14 @@
       database_port: {{ postgres_port }}
       database_user: {{ postgres_maas_user }}
       maas_url: http://{{ hostvars[inventory_hostname]['ansible_' + maas_interface].ipv4.address }}:5240/MAAS
-  when: inventory_hostname == leader_hostname
+  when: inventory_hostname == maas_leader_hostname
 
 - name: Ensure group "maas" exists
   become: yes
   group:
     name: maas
     state: present
+  when: inventory_hostname == maas_leader_hostname
 
 # sudo chown root:maas /etc/maas/regiond.conf
 # sudo chmod 640 /etc/maas/regiond.conf
@@ -61,27 +106,21 @@
     owner: root
     group: maas
     mode: 640
-  when: inventory_hostname == leader_hostname
+  when: inventory_hostname == maas_leader_hostname
 
-- name: Install MAAS 2.9 with apt
-  become: true
-  apt:
-    pkg: maas # includes maas-rack-controller and maas-region-controller
-  when: pkgm == "apt" and inventory_hostname == leader_hostname
-  register: maas_installed
-
+# sudo systemctl start maas-regiond
 - name: Restart maas-regiond service on leader node
   become: true
   service:
     name: maas-regiond
     state: restarted
-  when: inventory_hostname == leader_hostname and not maas_installed.changed
+  when: inventory_hostname == maas_leader_hostname
 
 - name: Sleep for 10 seconds to give time to maas to fully initialize
   wait_for:
     timeout: 10
   delegate_to: localhost
-  when: inventory_hostname == leader_hostname
+  when: inventory_hostname == maas_leader_hostname
 
 - name: Create MAAS admin user
   become: yes
@@ -89,7 +128,7 @@
                           --password {{ maas_admin_password }}
                           --email admin@apefactory.com
                           --ssh-import gh:jakoberpf
-  when: inventory_hostname == leader_hostname
+  when: inventory_hostname == maas_leader_hostname
   register: created_admin
   failed_when:
     - "'already exists' not in created_db.stderr"
@@ -99,40 +138,30 @@
 ###      The backup region nodes will be configured next.      ###
 ##################################################################
 
-- name: Install MAAS 2.9 with apt
-  become: true
-  apt:
-    pkg: maas # includes maas-rack-controller and maas-region-controller
-  when: pkgm == "apt" and inventory_hostname != leader_hostname
-  register: maas_installed
-
-- name: Sleep for 10 seconds to give time to maas to fully initialize
-  wait_for:
-    timeout: 10
-  delegate_to: localhost
-  when: inventory_hostname != leader_hostname and maas_installed.changed
-
-- name: Stop maas-regiond service on backup node
+- name: Ensure stopped maas-regiond service on backup node
   become: true
   service:
     name: maas-regiond
     state: stopped
-  when: inventory_hostname != leader_hostname
+  when: inventory_hostname != maas_leader_hostname
 
+# sudo rm /etc/maas/regiond.conf
 - name: Delete maas region controller config at /etc/maas/regiond.conf
   become: true
   file:
     state: absent
     path: /etc/maas/regiond.conf
-  when: inventory_hostname != leader_hostname
+  when: inventory_hostname != maas_leader_hostname
 
+# sudo touch /etc/maas/regiond.conf
 - name: Create maas region controller config at /etc/maas/regiond.conf
   become: true
   file:
     state: touch
     path: /etc/maas/regiond.conf
-  when: inventory_hostname != leader_hostname
+  when: inventory_hostname != maas_leader_hostname
 
+# sudo nano /etc/maas/regiond.conf
 - name: Create new maas region controller config at /etc/maas/regiond.conf
   become: true
   blockinfile:
@@ -144,8 +173,17 @@
       database_port: {{ postgres_port }}
       database_user: {{ postgres_maas_user }}
       maas_url: http://{{ hostvars[inventory_hostname]['ansible_' + maas_interface].ipv4.address }}:5240/MAAS
-  when: inventory_hostname != leader_hostname
+  when: inventory_hostname != maas_leader_hostname
 
+- name: Ensure group "maas" exists
+  become: yes
+  group:
+    name: maas
+    state: present
+  when: inventory_hostname != maas_leader_hostname
+
+# sudo chown root:maas /etc/maas/regiond.conf
+# sudo chmod 640 /etc/maas/regiond.conf
 - name: Set permissions on maas region controller config at /etc/maas/regiond.conf
   become: true
   file:
@@ -153,21 +191,37 @@
     owner: root
     group: maas
     mode: 640
-  when: inventory_hostname != leader_hostname
+  when: inventory_hostname != maas_leader_hostname
 
+# sudo rm /var/lib/maas/maas_id
 - name: Delete maas id at /var/lib/maas/maas_id
   become: true
   file:
     state: absent
     path: /var/lib/maas/maas_id
-  when: inventory_hostname != leader_hostname
+  when: inventory_hostname != maas_leader_hostname
 
+# sudo rm /var/lib/maas/secret
 - name: Delete maas secret at /var/lib/maas/secret
   become: true
   file:
     state: absent
     path: /var/lib/maas/secret
-  when: inventory_hostname != leader_hostname
+  when: inventory_hostname != maas_leader_hostname
+
+# sudo systemctl start maas-regiond
+- name: Restart maas-regiond service on leader node
+  become: true
+  service:
+    name: maas-regiond
+    state: restarted
+  when: inventory_hostname != maas_leader_hostname
+
+- name: Sleep for 10 seconds to give time to maas to fully initialize
+  wait_for:
+    timeout: 10
+  delegate_to: localhost
+  when: inventory_hostname != maas_leader_hostname
 
 ###############################################################
 ###      The backup region nodes are initialized now.       ###
@@ -179,11 +233,11 @@
   slurp:
     src: /var/lib/maas/secret
   register: maas_secret
-  when: inventory_hostname == leader_hostname
+  when: inventory_hostname == maas_leader_hostname
 
 - name: Register backup rack nodes
-  shell: sudo maas-rack register --url http://{{ hostvars[leader_hostname]['ansible_' + maas_interface].ipv4.address }}:5240/MAAS --secret {{ hostvars[leader_hostname].maas_secret }}
-  when: inventory_hostname != leader_hostname
+  shell: sudo maas-rack register --url http://{{ hostvars[maas_leader_hostname]['ansible_' + maas_interface].ipv4.address }}:5240/MAAS --secret {{ hostvars[maas_leader_hostname].maas_secret }}
+  when: inventory_hostname != maas_leader_hostname
 
 #############################################################
 ###      The backup rack nodes are initialized now.       ###
