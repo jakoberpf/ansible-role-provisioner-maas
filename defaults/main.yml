@@ -3,5 +3,10 @@
 postgres_maas_name: maasdb
 postgres_maas_user: maas
 
-# Defines the package manager to use for installing maas ('apt' or 'snap')
+# Defines the package manager to use for installing MAAS ('apt' or 'snap')
 pkgm: apt
+
+# If set to true the leader MAAS node will initialize the database. This will also delete all data.
+reinitilize: false
+
+time: "{{ timestamp.stdout }}"
