@@ -36,3 +36,12 @@ Author Information
 ------------------
 
 An optional section for the role authors to include contact information, or a website (HTML is not allowed).
+
+
+https://multiplay.blog/a-quick-adventure-in-maas-part-1-de6b376ba871
+https://multiplay.blog/a-quick-adventure-in-maas-part-2-3ac52106af14
+
+
+https://github.com/johanssone/ansible-role-maas
+https://github.com/mrlesmithjr/ansible-maas
+https://github.com/mrlesmithjr/ansible-maas/blob/master/tasks/config.yml
