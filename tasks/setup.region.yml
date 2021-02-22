@@ -1,0 +1,16 @@
+---
+- name: config | Configuring MAAS Region Controller
+  lineinfile:
+    dest: "/etc/maas/regiond.conf"
+    regexp: "^maas_url:"
+    line: "maas_url: {{ maas_region_controller_url }}"
+  notify: "restart maas-regiond"
+  when: >
+        maas_single_node_install or
+        (not maas_single_node_install and
+          inventory_hostname in groups['maas_region_controller'])
+- name: config | Setting MAAS Region Controller
+  set_fact:
+    maas_region_controller_host: "{{ groups['maas_region_controller'][0] }}"
+  when: >
+        not maas_single_node_install
