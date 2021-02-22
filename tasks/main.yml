@@ -60,19 +60,14 @@
 #   debug: var=created_db.stdout_lines
 #   when: inventory_hostname == leader_hostname
 
-
-####### TODO -> move to postgresql role for better implementation. Also the postgresql role know how the leader node is...
-
-# /etc/postgresql/10/main/pg_hba.conf -> host    maas    maasdb    0/0     md5
 - name: Edit "pg_hba.conf" on leader node
   become: true
   lineinfile:
         path: /data/patroni/pg_hba.conf
-        line:  host    maas    maasdb   0/0     md5
+        line:  host    maas    maasdb   {{ hostvars[item]['ansible_' + maas_interface].ipv4.address }}/0     md5
         create: yes
-  when: inventory_hostname == postgres_leader_hostname  
-
-####### TODO
+  when: inventory_hostname == postgres_leader_hostname 
+  with_items:  "{{ groups[inventory_groupname] }}"
 
 - name: Setup MAAS with apt
   include_tasks: install-by-apt.yml
